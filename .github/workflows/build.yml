@@ -1,0 +1,715 @@
+name: Build Kozly Weight APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 34
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Generate Android project
+        run: |
+          mkdir -p app/src/main/java/by/drofin/kozly
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+
+          cat > settings.gradle <<'EOF_SETTINGS'
+          pluginManagement {
+            repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+            repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'KozlyWeight'
+          include ':app'
+          EOF_SETTINGS
+
+          cat > build.gradle <<'EOF_ROOT'
+          plugins {
+            id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF_ROOT
+
+          cat > gradle.properties <<'EOF_PROPS'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.nonTransitiveRClass=true
+          EOF_PROPS
+
+          cat > app/build.gradle <<'EOF_APP'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'by.drofin.kozly'
+            compileSdk 34
+            defaultConfig {
+              applicationId 'by.drofin.kozly'
+              minSdk 26
+              targetSdk 34
+              versionCode 3
+              versionName '3.0'
+            }
+            compileOptions {
+              sourceCompatibility JavaVersion.VERSION_17
+              targetCompatibility JavaVersion.VERSION_17
+            }
+          }
+          EOF_APP
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF_MANIFEST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application
+              android:allowBackup="true"
+              android:icon="@mipmap/ic_launcher"
+              android:roundIcon="@mipmap/ic_launcher_round"
+              android:label="@string/app_name"
+              android:theme="@style/AppTheme"
+              android:usesCleartextTraffic="false"
+              android:hardwareAccelerated="true">
+              <activity
+                android:name=".MainActivity"
+                android:exported="true"
+                android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+                android:windowSoftInputMode="adjustResize">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF_MANIFEST
+
+          cat > app/src/main/java/by/drofin/kozly/MainActivity.java <<'EOF_JAVA'
+          package by.drofin.kozly;
+
+          import android.app.Activity;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.graphics.Color;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+            private WebView web;
+
+            @Override protected void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              getWindow().setStatusBarColor(Color.parseColor("#0d1117"));
+              getWindow().setNavigationBarColor(Color.parseColor("#0d1117"));
+
+              web = new WebView(this);
+              web.setBackgroundColor(Color.parseColor("#0d1117"));
+              web.setOverScrollMode(View.OVER_SCROLL_NEVER);
+              setContentView(web);
+
+              WebSettings s = web.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              s.setAllowFileAccess(true);
+              s.setAllowContentAccess(false);
+              s.setSupportZoom(false);
+              s.setBuiltInZoomControls(false);
+              s.setDisplayZoomControls(false);
+              s.setTextZoom(100);
+              s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+              if (Build.VERSION.SDK_INT >= 33) s.setAlgorithmicDarkeningAllowed(false);
+
+              web.addJavascriptInterface(new Bridge(), "KozlyAndroid");
+              web.setWebChromeClient(new WebChromeClient());
+              web.setWebViewClient(new WebViewClient() {
+                @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return true; }
+                @SuppressWarnings("deprecation")
+                @Override public boolean shouldOverrideUrlLoading(WebView v, String url) { return true; }
+              });
+              web.loadUrl("file:///android_asset/index.html");
+            }
+
+            @Override public void onBackPressed() {
+              if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
+            }
+
+            public class Bridge {
+              @JavascriptInterface public void copyText(String text) {
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("Вес козла", text));
+              }
+              @JavascriptInterface public boolean isApp() { return true; }
+            }
+          }
+          EOF_JAVA
+
+          cat > app/src/main/res/values/strings.xml <<'EOF_STRINGS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <string name="app_name">Вес козлов</string>
+          </resources>
+          EOF_STRINGS
+
+          cat > app/src/main/res/values/colors.xml <<'EOF_COLORS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <color name="bg">#0d1117</color>
+            <color name="amber">#ff9f2e</color>
+            <color name="ic_bg">#0d1117</color>
+          </resources>
+          EOF_COLORS
+
+          cat > app/src/main/res/values/themes.xml <<'EOF_THEMES'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+              <item name="android:windowBackground">@color/bg</item>
+              <item name="android:statusBarColor">@color/bg</item>
+              <item name="android:navigationBarColor">@color/bg</item>
+              <item name="android:windowLightStatusBar">false</item>
+              <item name="android:colorAccent">@color/amber</item>
+              <item name="android:windowActionModeOverlay">true</item>
+            </style>
+          </resources>
+          EOF_THEMES
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF_ICON'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="108dp" android:height="108dp"
+            android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#FF9F2E"
+              android:pathData="M27,46 C27,66 39,78 54,78 C69,78 81,66 81,46 Z"/>
+            <path android:fillColor="#FFC46B"
+              android:pathData="M27,46 a27,9 0 1,0 54,0 a27,9 0 1,0 -54,0"/>
+            <path android:fillColor="#0d1117" android:fillAlpha="0.35"
+              android:pathData="M37,46 a17,5 0 1,0 34,0 a17,5 0 1,0 -34,0"/>
+            <path android:fillColor="#FFFFFF" android:fillAlpha="0.14"
+              android:pathData="M36,54 C38,62 44,68 50,70 C44,66 40,60 39,53 Z"/>
+          </vector>
+          EOF_ICON
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_MIP'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@color/ic_bg"/>
+            <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF_MIP
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'EOF_MIPR'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+            <background android:drawable="@color/ic_bg"/>
+            <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF_MIPR
+
+          cat > app/src/main/assets/index.html <<'EOF_HTML'
+          <!DOCTYPE html>
+          <html lang="ru">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+          <title>Калькулятор веса козлов</title>
+          <meta name="theme-color" content="#0d1117">
+          <style>
+          :root{
+            --bg:#0d1117; --bg2:#131a23; --surface:#1a222e; --surface2:#222d3b;
+            --line:#2e3b4d; --steel:#8fa7c2; --text:#e8eef6; --muted:#93a3b6;
+            --amber:#ff9f2e; --amber2:#ffc46b; --ember:#ff5c38;
+            --blue:#37a6ff; --green:#3ddc84; --red:#ff5470; --r:16px;
+          }
+          *{box-sizing:border-box;margin:0;padding:0}
+          html{overflow-x:clip;scrollbar-color:var(--amber) var(--bg2)}
+          ::-webkit-scrollbar{width:10px;height:10px}
+          ::-webkit-scrollbar-track{background:var(--bg2)}
+          ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--amber),#b86a1f);border-radius:8px;border:2px solid var(--bg2)}
+          body{
+            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+            background:radial-gradient(620px 300px at 88% -60px,rgba(255,159,46,.11),transparent 60%),
+              radial-gradient(520px 340px at -12% 22%,rgba(55,166,255,.07),transparent 60%),
+              linear-gradient(180deg,var(--bg2),var(--bg) 340px);
+            color:var(--text);min-height:100vh;touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+          }
+          main{max-width:560px;margin:0 auto;padding:10px 12px calc(28px + env(safe-area-inset-bottom))}
+          header{max-width:560px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 12px 8px}
+          .logo{width:40px;height:40px;flex:none;filter:drop-shadow(0 0 10px rgba(255,159,46,.35))}
+          .htitle{flex:1;min-width:0}
+          .htitle h1{font-size:17px;font-weight:800;letter-spacing:.2px}
+          .htitle p{font-size:11px;color:var(--muted)}
+          .chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--green);border:1px solid rgba(61,220,132,.35);background:rgba(61,220,132,.08);border-radius:99px;padding:5px 10px;white-space:nowrap}
+          .chip i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+          .card{background:linear-gradient(180deg,var(--surface),#18202b);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-top:12px;animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
+          .card:nth-of-type(2){animation-delay:.05s}.card:nth-of-type(3){animation-delay:.1s}.card:nth-of-type(4){animation-delay:.15s}.card:nth-of-type(5){animation-delay:.2s}
+          @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+          .ctitle{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+          .ctitle::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+          .result{position:sticky;top:calc(6px + env(safe-area-inset-top));z-index:30;border:1px solid transparent;border-radius:18px;
+            background:linear-gradient(180deg,#1c2531,#171f2a) padding-box,linear-gradient(120deg,var(--amber),var(--blue)) border-box;
+            box-shadow:0 12px 32px rgba(0,0,0,.5),0 0 26px rgba(255,159,46,.08);padding:14px;margin-top:8px;animation:rise .5s both}
+          .rlabel{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+          .rnet{display:flex;align-items:baseline;gap:8px;margin:2px 0}
+          .rnet b{font-size:clamp(32px,9.5vw,46px);font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05;
+            background:linear-gradient(100deg,var(--amber2),var(--amber) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent}
+          .rnet span{font-size:16px;color:var(--steel);font-weight:700}
+          .rnet b.pulse{animation:pulse .35s ease}
+          @keyframes pulse{0%{transform:scale(1)}35%{transform:scale(1.035)}100%{transform:scale(1)}}
+          .rsub{font-size:12px;color:var(--muted);min-height:16px}
+          .rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+          .rcell{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:8px 9px;min-width:0}
+          .rcell small{display:block;font-size:10px;color:var(--muted);letter-spacing:.04em;margin-bottom:2px}
+          .rcell b{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+          .rcell.ded b{color:var(--red)}
+          .rbtns{display:flex;gap:8px;margin-top:12px}
+          .btn{flex:1;min-height:46px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;transition:transform .12s ease,border-color .15s}
+          .btn:active{transform:scale(.97)}
+          .btn.primary{background:linear-gradient(120deg,var(--amber2),var(--amber) 60%,#f07a1f);color:#221302;border-color:transparent;box-shadow:0 4px 16px rgba(255,159,46,.28)}
+          .btn.danger{color:var(--red);border-color:rgba(255,84,112,.35)}
+          .btn.small{flex:none;min-height:38px;padding:0 12px;font-size:12px}
+          input[type=text]{width:100%;min-height:48px;font-size:16px;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:0 12px;outline:none;transition:border-color .15s,box-shadow .15s}
+          input:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,159,46,.15)}
+          select{width:100%;min-height:42px;font-size:13px;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:0 34px 0 12px;outline:none;appearance:none;-webkit-appearance:none;
+            background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%23ff9f2e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+          select option{background:var(--surface)}
+          .mats{display:flex;gap:8px}
+          .mat{flex:1;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--text);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:all .15s ease;padding:6px}
+          .mat b{font-size:15px;font-weight:800}
+          .mat small{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+          .mat.active{border-color:var(--amber);background:rgba(255,159,46,.1);box-shadow:0 0 14px rgba(255,159,46,.18)}
+          .mat.active b{color:var(--amber2)}
+          .mat:active{transform:scale(.97)}
+          .field{display:block;margin-top:10px}
+          .field>span{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+          .inwrap{position:relative}
+          .inwrap em{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-style:normal;font-size:12px;color:var(--steel);pointer-events:none}
+          .inwrap input{padding-right:44px;font-variant-numeric:tabular-nums}
+          .shapes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+          .shape{min-height:72px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--steel);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:10.5px;font-weight:700;cursor:pointer;transition:all .15s ease;padding:6px 3px;text-align:center}
+          .shape svg{width:26px;height:26px}
+          .shape.active{color:var(--amber2);border-color:var(--amber);background:rgba(255,159,46,.1);box-shadow:0 0 14px rgba(255,159,46,.18)}
+          .shape:active{transform:scale(.95)}
+          .preview{margin-top:12px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+          .preview svg{display:block;width:100%;height:auto}
+          .units{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;margin-bottom:4px}
+          .unit{flex:1;min-height:40px;border:none;border-radius:9px;background:transparent;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;transition:all .15s}
+          .unit.active{background:linear-gradient(120deg,var(--amber2),var(--amber));color:#221302;box-shadow:0 2px 10px rgba(255,159,46,.3)}
+          .trashrow{display:flex;gap:10px;align-items:center}
+          .trashrow .inwrap{width:110px;flex:none}
+          input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:34px;background:transparent;cursor:pointer}
+          input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:6px;background:linear-gradient(90deg,var(--green),var(--amber) 55%,var(--red));border:1px solid var(--line)}
+          input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;margin-top:-10px;background:radial-gradient(circle at 35% 30%,var(--amber2),var(--amber) 60%,#c96a15);border:2px solid #0d1117;box-shadow:0 0 12px rgba(255,159,46,.5)}
+          input[type=range]::-moz-range-track{height:8px;border-radius:6px;background:linear-gradient(90deg,var(--green),var(--amber) 55%,var(--red))}
+          input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:var(--amber);border:2px solid #0d1117}
+          .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
+          .hint b{color:var(--amber2)}
+          .jtools{display:flex;gap:8px;margin-bottom:10px}
+          .jtools input{flex:1;min-height:42px;font-size:14px}
+          .jtools select{width:150px;flex:none}
+          .jlist{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding-right:2px}
+          .jrow{display:grid;grid-template-columns:34px 1fr 40px;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:9px 10px;cursor:pointer;transition:border-color .15s,transform .12s}
+          .jrow:active{transform:scale(.99);border-color:var(--amber)}
+          .jrow svg{width:26px;height:26px;color:var(--steel)}
+          .jrow .t{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          .jrow .s{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          .jrow .s b{color:var(--amber2)}
+          .jdel{width:38px;height:38px;border-radius:10px;border:1px solid rgba(255,84,112,.3);background:rgba(255,84,112,.07);color:var(--red);font-size:16px;cursor:pointer}
+          .jempty{border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:13px}
+          .jfoot{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+          .jcount{font-size:11px;color:var(--muted)}
+          footer{max-width:560px;margin:18px auto 0;padding:0 12px calc(18px + env(safe-area-inset-bottom));text-align:center;color:var(--muted);font-size:12px}
+          footer b{color:var(--steel)}
+          footer .v{font-size:10px;opacity:.7;margin-top:3px}
+          #toast{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:100;max-width:536px;margin:0 auto;display:flex;align-items:center;gap:10px;background:#1c2531;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:12px;padding:12px 14px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.55);opacity:0;transform:translateY(16px);pointer-events:none;transition:all .25s ease}
+          #toast.show{opacity:1;transform:none;pointer-events:auto}
+          #toast.success{border-left-color:var(--green)}#toast.warn{border-left-color:var(--amber)}#toast.danger{border-left-color:var(--red)}
+          #toast span{flex:1}
+          #toast button{border:1px solid var(--amber);background:rgba(255,159,46,.12);color:var(--amber2);border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+          [hidden]{display:none!important}
+          @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+          @media (max-width:340px){.rgrid{gap:6px}.rcell b{font-size:12px}.jtools select{width:128px}.shape{font-size:9.5px}}
+          </style>
+          </head>
+          <body>
+          <header>
+            <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
+              <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc46b"/><stop offset="1" stop-color="#ff5c38"/></linearGradient></defs>
+              <rect x="2" y="2" width="44" height="44" rx="12" fill="#1a222e" stroke="#2e3b4d"/>
+              <path d="M10 19c0 12 6 19 14 19s14-7 14-19z" fill="url(#lg)"/>
+              <ellipse cx="24" cy="19" rx="14" ry="5" fill="#ffc46b"/>
+              <ellipse cx="24" cy="19" rx="9" ry="3" fill="#1a222e" opacity=".35"/>
+            </svg>
+            <div class="htitle"><h1>Вес козлов</h1><p>чаша шлаковоза · сталь и чугун</p></div>
+            <span class="chip"><i></i>APK · офлайн</span>
+          </header>
+
+          <main>
+            <section class="result" aria-live="polite">
+              <div class="rlabel">Чистый вес козла</div>
+              <div class="rnet"><b id="netVal">—</b><span id="netUnit">кг</span></div>
+              <div class="rsub" id="netSub">введите размеры</div>
+              <div class="rgrid">
+                <div class="rcell"><small>Объём</small><b id="volVal">—</b></div>
+                <div class="rcell"><small>Брутто</small><b id="grossVal">—</b></div>
+                <div class="rcell ded"><small>Вычет засора</small><b id="dedVal">—</b></div>
+              </div>
+              <div class="rbtns">
+                <button class="btn primary" id="copyBtn" type="button">Копировать</button>
+                <button class="btn" id="saveBtn" type="button">В журнал</button>
+                <button class="btn danger" id="resetBtn" type="button">Сброс</button>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="ctitle">Материал</div>
+              <div class="mats" id="mats">
+                <button class="mat" type="button" data-mat="steel"><b>Сталь</b><small>7850 кг/м³</small></button>
+                <button class="mat" type="button" data-mat="castiron"><b>Чугун</b><small>7200 кг/м³</small></button>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="ctitle">Форма козла</div>
+              <div class="shapes" id="shapes">
+                <button class="shape" type="button" data-shape="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 7.5l8 4.5v9l-8-4.5z"/><path d="M20 7.5l-8 4.5v9l8-4.5z"/></svg>Параллелепипед</button>
+                <button class="shape" type="button" data-shape="cap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 10c0 7 3.8 11 8.5 11s8.5-4 8.5-11"/><ellipse cx="12" cy="10" rx="8.5" ry="3.4"/><path d="M12 13.4V21" stroke-dasharray="2 2" opacity=".7"/></svg>Полушар<span style="font-size:9px;opacity:.75;font-weight:600">высота h</span></button>
+                <button class="shape" type="button" data-shape="cylinder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v13c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-13"/></svg>Цилиндр</button>
+              </div>
+              <div class="preview"><svg id="preview" viewBox="0 0 340 210" role="img" aria-label="Чертёж козла"></svg></div>
+            </section>
+
+            <section class="card">
+              <div class="ctitle">Размеры</div>
+              <div class="units" id="units">
+                <button class="unit" type="button" data-unit="mm">мм</button>
+                <button class="unit" type="button" data-unit="cm">см</button>
+                <button class="unit" type="button" data-unit="m">м</button>
+              </div>
+              <div id="fields"></div>
+            </section>
+
+            <section class="card">
+              <div class="ctitle">Засор</div>
+              <div class="trashrow">
+                <div class="inwrap"><input id="trashNum" type="text" inputmode="decimal" autocomplete="off" value="0"><em>%</em></div>
+                <input id="trashRange" type="range" min="0" max="100" step="0.5" value="0" aria-label="Засор, процент">
+              </div>
+              <div class="hint">10% засора = −8% массы · сейчас вычет <b id="dedHint">−0,0%</b></div>
+            </section>
+
+            <section class="card">
+              <div class="ctitle">Журнал взвешиваний</div>
+              <div class="jtools">
+                <input id="jSearch" type="text" inputmode="search" placeholder="Поиск: материал, форма…" autocomplete="off">
+                <select id="jSort" aria-label="Сортировка">
+                  <option value="new">Сначала новые</option>
+                  <option value="old">Сначала старые</option>
+                  <option value="mass">По массе</option>
+                </select>
+              </div>
+              <div class="jlist" id="jList"></div>
+              <div class="jfoot">
+                <span class="jcount" id="jCount">0 записей</span>
+                <button class="btn small danger" id="jClear" type="button">Очистить</button>
+              </div>
+            </section>
+          </main>
+
+          <footer>
+            Автор программы: <b>Владимир Дрофин</b>
+            <div class="v">v3.0 · APK · работает офлайн</div>
+          </footer>
+
+          <div id="toast" role="status"></div>
+
+          <script>
+          'use strict';
+          const MATERIALS={steel:{name:'Сталь',density:7850},castiron:{name:'Чугун',density:7200}};
+          const SHAPES={
+            box:{name:'Параллелепипед',fields:[['a','Длина a'],['b','Ширина b'],['c','Высота c']]},
+            cap:{name:'Полушар',fields:[['d','Диаметр основания d'],['h','Высота (глубина) h']]},
+            cylinder:{name:'Цилиндр',fields:[['d','Диаметр d'],['h','Высота / длина h']]}
+          };
+          const FACT={mm:0.001,cm:0.01,m:1};
+          const K_STATE='kozly.v1.state',K_JOURNAL='kozly.v1.journal';
+          const DEFAULT={material:'steel',shape:'cap',unit:'mm',dims:{a:1200,b:600,c:250,d:800,h:400},trash:0};
+          let state=JSON.parse(JSON.stringify(DEFAULT)),journal=[],undoBuf=null,lastNet='';
+
+          const $=id=>document.getElementById(id);
+          const nf={0:new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}),1:new Intl.NumberFormat('ru-RU',{minimumFractionDigits:1,maximumFractionDigits:1}),2:new Intl.NumberFormat('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}),3:new Intl.NumberFormat('ru-RU',{minimumFractionDigits:3,maximumFractionDigits:3})};
+          const fmt=(n,d=2)=>nf[d].format(n);
+          const parseNum=v=>{v=String(v).trim().replace(',','.');if(v==='')return NaN;const n=Number(v);return isFinite(n)?n:NaN};
+          const smart=v=>Number.isInteger(v)?String(v):String(Number(v.toFixed(2)));
+          const dimVal=k=>isFinite(state.dims[k])?state.dims[k]:'';
+          const matName=()=>MATERIALS[state.material].name;
+          const density=()=>MATERIALS[state.material].density;
+          function persist(){try{localStorage.setItem(K_STATE,JSON.stringify(state));localStorage.setItem(K_JOURNAL,JSON.stringify(journal))}catch(e){}}
+          function loadAll(){
+            try{
+              const s=JSON.parse(localStorage.getItem(K_STATE));
+              if(s&&SHAPES[s.shape]&&FACT[s.unit]&&MATERIALS[s.material]){state=Object.assign(JSON.parse(JSON.stringify(DEFAULT)),s);state.dims=Object.assign({a:'',b:'',c:'',d:'',h:''},s.dims)}
+              const j=JSON.parse(localStorage.getItem(K_JOURNAL));
+              if(Array.isArray(j))journal=j.filter(e=>e&&SHAPES[e.shape]&&MATERIALS[e.material]);else seedJournal();
+            }catch(e){seedJournal()}
+          }
+          function compute(){
+            const f=FACT[state.unit],d=density();
+            for(const[k]of SHAPES[state.shape].fields){const v=state.dims[k];if(!(isFinite(v)&&v>0))return{ok:false}}
+            const a=state.dims.a*f,b=state.dims.b*f,c=state.dims.c*f,dd=state.dims.d*f,h=state.dims.h*f;let V=0;
+            switch(state.shape){
+              case'box':V=a*b*c;break;
+              case'cap':{const r=dd/2;V=Math.PI*h*(3*r*r+h*h)/6;break}
+              case'cylinder':V=Math.PI*(dd/2)*(dd/2)*h;break;
+            }
+            const gross=V*d,dedPct=state.trash*0.8,dedKg=gross*dedPct/100;
+            return{ok:true,V,gross,dedPct,dedKg,net:gross-dedKg};
+          }
+          function shapeTitle(shape,dims,unit){
+            const g=k=>isFinite(dims[k])?smart(dims[k]):'—';
+            switch(shape){
+              case'box':return'Паралл. '+g('a')+'×'+g('b')+'×'+g('c')+' '+unit;
+              case'cap':return'Полушар Ø'+g('d')+' h'+g('h')+' '+unit;
+              case'cylinder':return'Цилиндр Ø'+g('d')+'×'+g('h')+' '+unit;
+            }
+          }
+          let toastTimer=null;
+          function toast(msg,type='info',action){
+            const t=$('toast');clearTimeout(toastTimer);t.className=type;t.innerHTML='';
+            const s=document.createElement('span');s.textContent=msg;t.appendChild(s);
+            if(action){const b=document.createElement('button');b.type='button';b.textContent=action.label;b.onclick=()=>{action.fn();hideToast()};t.appendChild(b)}
+            requestAnimationFrame(()=>t.classList.add('show'));
+            toastTimer=setTimeout(hideToast,action?6000:3200);
+          }
+          function hideToast(){$('toast').classList.remove('show')}
+          function buildFields(){
+            let html=SHAPES[state.shape].fields.map(([k,label])=>
+              '<label class="field"><span>'+label+'</span><div class="inwrap"><input data-dim="'+k+'" type="text" inputmode="decimal" autocomplete="off" value="'+dimVal(k)+'"><em>'+state.unit+'</em></div></label>').join('');
+            if(state.shape==='cap')html+='<div class="hint" id="capHint"></div>';
+            $('fields').innerHTML=html;
+          }
+          function syncUI(){
+            document.querySelectorAll('.mat').forEach(b=>b.classList.toggle('active',b.dataset.mat===state.material));
+            document.querySelectorAll('.shape').forEach(b=>b.classList.toggle('active',b.dataset.shape===state.shape));
+            document.querySelectorAll('.unit').forEach(b=>b.classList.toggle('active',b.dataset.unit===state.unit));
+            buildFields();
+            $('trashNum').value=smart(state.trash);$('trashRange').value=state.trash;
+            $('dedHint').textContent='−'+fmt(state.trash*0.8,1)+'%';
+          }
+          function update(){
+            const r=compute(),net=$('netVal');
+            if(r.ok){
+              const txt=fmt(r.net);net.textContent=txt;$('netUnit').textContent='кг';
+              let sub='';if(r.net<1)sub='≈ '+fmt(r.net*1000,0)+' г';else if(r.net>=1000)sub='≈ '+fmt(r.net/1000,3)+' т';
+              $('netSub').textContent=sub||matName()+' · '+shapeTitle(state.shape,state.dims,state.unit);
+              $('volVal').textContent=r.V>=0.05?fmt(r.V,3)+' м³':fmt(r.V*1e6,1)+' см³';
+              $('grossVal').textContent=fmt(r.gross)+' кг';
+              $('dedVal').textContent='−'+fmt(r.dedKg)+' кг';
+              if(txt!==lastNet){net.classList.remove('pulse');void net.offsetWidth;net.classList.add('pulse');lastNet=txt}
+            }else{
+              net.textContent='—';$('netUnit').textContent='кг';$('netSub').textContent='введите размеры больше нуля';
+              $('volVal').textContent='—';$('grossVal').textContent='—';$('dedVal').textContent='—';lastNet='';
+            }
+            const ch=$('capHint');
+            if(ch){
+              const d=state.dims.d,h=state.dims.h;
+              if(isFinite(d)&&d>0&&isFinite(h)&&h>0){
+                const ratio=h/(d/2);
+                ch.innerHTML=Math.abs(ratio-1)<=0.03?'<b>h = d/2</b> — точный полушар.':ratio<1?'Чаша мельче полушара (<b>h &lt; d/2</b>).':'Чаша глубже полушара (<b>h &gt; d/2</b>).';
+              }else ch.innerHTML='При <b>h = d/2</b> получается точный полушар. Шаровой сегмент считается по диаметру основания и глубине.';
+            }
+            renderPreview();persist();
+          }
+          function renderPreview(){
+            const u=state.unit,g=k=>isFinite(state.dims[k])&&state.dims[k]>0?state.dims[k]:null;
+            const lbl=k=>g(k)===null?'—':smart(g(k))+' '+u;
+            const defs='<defs>'
+              +'<linearGradient id="gt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c3d3e6"/><stop offset="1" stop-color="#8fa7c2"/></linearGradient>'
+              +'<linearGradient id="gm" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#55697f"/><stop offset=".45" stop-color="#b9c9dc"/><stop offset="1" stop-color="#3c4d61"/></linearGradient>'
+              +'<linearGradient id="gd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#33445a"/><stop offset="1" stop-color="#22303f"/></linearGradient>'
+              +'<radialGradient id="rg" cx=".35" cy=".25" r=".95"><stop offset="0" stop-color="#dfe9f5"/><stop offset=".55" stop-color="#8fa7c2"/><stop offset="1" stop-color="#3a4a5e"/></radialGradient>'
+              +'<pattern id="gp" width="22" height="22" patternUnits="userSpaceOnUse"><path d="M22 0H0V22" fill="none" stroke="#8fa7c2" stroke-opacity=".07"/></pattern>'
+              +'</defs><rect width="340" height="210" fill="url(#gp)"/>';
+            const dimH=(x1,x2,y,t)=>'<g stroke="#ff9f2e" stroke-opacity=".85"><line x1="'+x1+'" y1="'+y+'" x2="'+x2+'" y2="'+y+'"/><line x1="'+x1+'" y1="'+(y-4)+'" x2="'+x1+'" y2="'+(y+4)+'"/><line x1="'+x2+'" y1="'+(y-4)+'" x2="'+x2+'" y2="'+(y+4)+'"/></g><text x="'+((x1+x2)/2)+'" y="'+(y-6)+'" text-anchor="middle" font-size="11" fill="#ffc46b" font-weight="600">'+t+'</text>';
+            const dimV=(x,y1,y2,t)=>'<g stroke="#ff9f2e" stroke-opacity=".85"><line x1="'+x+'" y1="'+y1+'" x2="'+x+'" y2="'+y2+'"/><line x1="'+(x-4)+'" y1="'+y1+'" x2="'+(x+4)+'" y2="'+y1+'"/><line x1="'+(x-4)+'" y1="'+y2+'" x2="'+(x+4)+'" y2="'+y2+'"/></g><text x="'+(x+7)+'" y="'+((y1+y2)/2+4)+'" font-size="11" fill="#ffc46b" font-weight="600">'+t+'</text>';
+            let s='';
+            if(state.shape==='box'){
+              const a=g('a')??1200,b=g('b')??600,c=g('c')??250,m=Math.max(a,b,c);
+              const A=Math.max(20,96*a/m),B=Math.max(20,96*b/m),C=Math.max(18,96*c/m);
+              const P0=[170,172],va=[A*.866,-A*.5],vb=[-B*.866,-B*.5],vc=[0,-C];
+              const add=(p,v)=>[p[0]+v[0],p[1]+v[1]];
+              const P1=add(P0,va),P2=add(P0,vb),T0=add(P0,vc),T1=add(P1,vc),T2=add(P2,vc),T3=add(add(P0,va),add(vb,vc));
+              const pts=arr=>arr.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+              s='<polygon points="'+pts([T0,T1,T3,T2])+'" fill="url(#gt)" stroke="#0d1117" stroke-opacity=".4"/>'
+               +'<polygon points="'+pts([P0,P2,T2,T0])+'" fill="url(#gm)" stroke="#0d1117" stroke-opacity=".4"/>'
+               +'<polygon points="'+pts([P0,P1,T1,T0])+'" fill="url(#gd)" stroke="#0d1117" stroke-opacity=".4"/>'
+               +'<text x="'+((P0[0]+P1[0])/2+8)+'" y="'+((P0[1]+P1[1])/2+16)+'" font-size="11" fill="#ffc46b" font-weight="600">a='+lbl('a')+'</text>'
+               +'<text x="'+((P0[0]+P2[0])/2-8)+'" y="'+((P0[1]+P2[1])/2+16)+'" text-anchor="end" font-size="11" fill="#ffc46b" font-weight="600">b='+lbl('b')+'</text>'
+               +dimV(P1[0]+16,T1[1],P1[1],'c='+lbl('c'));
+            }else if(state.shape==='cap'){
+              const d=g('d')??800,h=g('h')??400,ratio=Math.min(1.55,Math.max(.16,h/(d/2)));
+              const rx=80,hh=rx*ratio,cx=170,topY=64,ry=rx*.22;
+              const dome=(dep,fill,extra)=>'<path d="M '+(cx-rx)+' '+topY+' C '+(cx-rx)+' '+(topY+dep*1.333)+' '+(cx+rx)+' '+(topY+dep*1.333)+' '+(cx+rx)+' '+topY+' Z" fill="'+fill+'" '+(extra||'')+'/>';
+              s='';
+              if(g('d')&&g('h')&&Math.abs(ratio-1)>0.05)s+=dome(rx,'none','stroke="#8fa7c2" stroke-opacity=".3" stroke-dasharray="5 4"');
+              s+=dome(hh,'url(#rg)','stroke="#0d1117" stroke-opacity=".35"');
+              s+='<ellipse cx="'+cx+'" cy="'+topY+'" rx="'+rx+'" ry="'+ry+'" fill="url(#gt)" stroke="#ff9f2e" stroke-opacity=".5"/>';
+              s+='<ellipse cx="'+(cx-26)+'" cy="'+(topY+hh*.42)+'" rx="18" ry="'+Math.max(6,hh*.16)+'" fill="#ffffff" opacity=".12" transform="rotate(-18 '+(cx-26)+' '+(topY+hh*.42)+')"/>';
+              s+=dimH(cx-rx,cx+rx,topY-ry-12,'d = '+lbl('d'));
+              s+=dimV(cx+rx+16,topY,topY+hh,'h = '+lbl('h'));
+              s+='<text x="'+cx+'" y="'+Math.min(204,topY+hh+16)+'" text-anchor="middle" font-size="10" fill="#93a3b6">шаровой сегмент · чаша шлаковоза</text>';
+            }else{
+              const d=g('d')??500,h=g('h')??900,r=Math.min(2.3,Math.max(.45,h/d)),w=96,hh=Math.min(128,96*r),cx=170,bot=160,top=bot-hh,ry=w*.16;
+              s='<ellipse cx="'+cx+'" cy="'+bot+'" rx="'+(w/2)+'" ry="'+ry+'" fill="url(#gd)"/>'
+               +'<rect x="'+(cx-w/2)+'" y="'+top+'" width="'+w+'" height="'+hh+'" fill="url(#gm)"/>'
+               +'<ellipse cx="'+cx+'" cy="'+top+'" rx="'+(w/2)+'" ry="'+ry+'" fill="url(#gt)" stroke="#ff9f2e" stroke-opacity=".5"/>'
+               +dimH(cx-w/2,cx+w/2,top-ry-12,'d = '+lbl('d'))
+               +dimV(cx+w/2+16,top,bot,'h = '+lbl('h'));
+            }
+            $('preview').innerHTML=defs+s;
+          }
+          function seedJournal(){
+            const now=Date.now(),saved=state;
+            const mk=(material,shape,dims,trash,ago)=>{
+              state=Object.assign(JSON.parse(JSON.stringify(DEFAULT)),{material,shape,unit:'mm',dims:Object.assign({a:'',b:'',c:'',d:'',h:''},dims),trash});
+              const r=compute();
+              return{id:'s'+ago,ts:now-ago,material,shape,unit:'mm',dims:Object.assign({},state.dims),trash,gross:r.gross,net:r.net};
+            };
+            journal=[
+              mk('castiron','cap',{d:800,h:400},12,3*3600e3),
+              mk('steel','box',{a:1200,b:600,c:250},5,27*3600e3),
+              mk('castiron','cylinder',{d:500,h:900},0,52*3600e3)
+            ];
+            state=saved;persist();
+          }
+          const miniIcon=shape=>{
+            const p={box:'<path d="M12 3l8 4.5-8 4.5-8-4.5z"/><path d="M4 7.5l8 4.5v9l-8-4.5z"/><path d="M20 7.5l-8 4.5v9l8-4.5z"/>',
+            cap:'<path d="M3.5 10c0 7 3.8 11 8.5 11s8.5-4 8.5-11"/><ellipse cx="12" cy="10" rx="8.5" ry="3.4"/>',
+            cylinder:'<ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v13c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-13"/>'};
+            return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">'+p[shape]+'</svg>';
+          };
+          function when(ts){
+            const d=new Date(ts),n=new Date();
+            const t=new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit'}).format(d);
+            const day=x=>x.getFullYear()+'-'+x.getMonth()+'-'+x.getDate();
+            const y=new Date(n);y.setDate(n.getDate()-1);
+            if(day(d)===day(n))return'сегодня '+t;
+            if(day(d)===day(y))return'вчера '+t;
+            return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit'}).format(d);
+          }
+          function renderJournal(){
+            const q=$('jSearch').value.trim().toLowerCase(),sort=$('jSort').value;
+            let arr=journal.filter(e=>(MATERIALS[e.material].name+' '+SHAPES[e.shape].name+' '+shapeTitle(e.shape,e.dims,e.unit)).toLowerCase().includes(q));
+            arr.sort((a,b)=>sort==='old'?a.ts-b.ts:sort==='mass'?b.net-a.net:b.ts-a.ts);
+            $('jCount').textContent=journal.length+' записей';
+            $('jList').innerHTML=arr.length?arr.map(e=>
+              '<div class="jrow" data-id="'+e.id+'">'+miniIcon(e.shape)
+              +'<div><div class="t">'+shapeTitle(e.shape,e.dims,e.unit)+'</div>'
+              +'<div class="s">'+MATERIALS[e.material].name+' · <b>'+fmt(e.net)+' кг</b>'+(e.trash?' · засор '+smart(e.trash)+'%':'')+' · '+when(e.ts)+'</div></div>'
+              +'<button class="jdel" type="button" aria-label="Удалить">✕</button></div>').join('')
+              :'<div class="jempty">Пока пусто. Посчитай козёл и нажми «В журнал».</div>';
+          }
+          function saveEntry(){
+            const r=compute();if(!r.ok){toast('Сначала введи размеры','warn');return}
+            journal.unshift({id:'e'+Date.now(),ts:Date.now(),material:state.material,shape:state.shape,unit:state.unit,dims:Object.assign({},state.dims),trash:state.trash,gross:r.gross,net:r.net});
+            if(journal.length>60)journal.length=60;
+            persist();renderJournal();toast('Козёл записан в журнал','success');
+          }
+          function loadEntry(id){
+            const e=journal.find(x=>x.id===id);if(!e)return;
+            state.material=e.material;state.shape=e.shape;state.unit=e.unit;state.dims=Object.assign({a:'',b:'',c:'',d:'',h:''},e.dims);state.trash=e.trash;
+            syncUI();update();window.scrollTo({top:0,behavior:'smooth'});toast('Загружено из журнала');
+          }
+          function deleteEntry(id){
+            const i=journal.findIndex(x=>x.id===id);if(i<0)return;
+            undoBuf={type:'one',items:[journal[i]],index:i};journal.splice(i,1);
+            persist();renderJournal();toast('Запись удалена','warn',{label:'Вернуть',fn:undo});
+          }
+          function clearJournal(){
+            if(!journal.length)return;
+            undoBuf={type:'all',items:journal.slice(),index:0};journal=[];
+            persist();renderJournal();toast('Журнал очищен','warn',{label:'Вернуть',fn:undo});
+          }
+          function undo(){
+            if(!undoBuf)return;
+            if(undoBuf.type==='all')journal=undoBuf.items.concat(journal);
+            else journal.splice(Math.min(undoBuf.index,journal.length),0,undoBuf.items[0]);
+            undoBuf=null;persist();renderJournal();toast('Восстановлено','success');
+          }
+          function nativeCopy(txt){try{if(window.KozlyAndroid&&window.KozlyAndroid.copyText){window.KozlyAndroid.copyText(txt);return true}}catch(e){}return false}
+          function copyResult(){
+            const r=compute();if(!r.ok){toast('Сначала введи размеры','warn');return}
+            const txt='Козёл — '+matName()+'\n'+shapeTitle(state.shape,state.dims,state.unit)
+              +'\nБрутто: '+fmt(r.gross)+' кг\nЗасор: '+smart(state.trash)+'% (−'+fmt(r.dedPct,1)+'% = −'+fmt(r.dedKg)+' кг)'
+              +'\nЧистый вес: '+fmt(r.net)+' кг';
+            const done=()=>toast('Скопировано','success');
+            if(nativeCopy(txt)){done();return}
+            if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done).catch(()=>fallbackCopy(txt,done));
+            else fallbackCopy(txt,done);
+          }
+          function fallbackCopy(txt,done){
+            const ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='position:fixed;opacity:0';
+            document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done()}catch(e){toast('Не удалось скопировать','danger')}
+            document.body.removeChild(ta);
+          }
+          $('mats').addEventListener('click',e=>{const b=e.target.closest('.mat');if(!b)return;state.material=b.dataset.mat;syncUI();update()});
+          $('shapes').addEventListener('click',e=>{const b=e.target.closest('.shape');if(!b)return;state.shape=b.dataset.shape;syncUI();update()});
+          $('units').addEventListener('click',e=>{
+            const b=e.target.closest('.unit');if(!b||b.dataset.unit===state.unit)return;
+            const k=FACT[state.unit]/FACT[b.dataset.unit];
+            for(const key of['a','b','c','d','h'])if(isFinite(state.dims[key]))state.dims[key]=Number((state.dims[key]*k).toPrecision(6));
+            state.unit=b.dataset.unit;syncUI();update();
+          });
+          $('fields').addEventListener('input',e=>{const k=e.target.dataset.dim;if(!k)return;state.dims[k]=parseNum(e.target.value);update()});
+          $('trashRange').addEventListener('input',e=>{state.trash=Number(e.target.value);$('trashNum').value=smart(state.trash);$('dedHint').textContent='−'+fmt(state.trash*0.8,1)+'%';update()});
+          $('trashNum').addEventListener('input',e=>{
+            let v=parseNum(e.target.value);if(!isFinite(v))v=0;v=Math.min(100,Math.max(0,v));
+            state.trash=v;$('trashRange').value=v;$('dedHint').textContent='−'+fmt(v*0.8,1)+'%';update();
+          });
+          $('resetBtn').addEventListener('click',()=>{state.dims={a:'',b:'',c:'',d:'',h:''};state.trash=0;syncUI();update();toast('Размеры сброшены')});
+          $('copyBtn').addEventListener('click',copyResult);
+          $('saveBtn').addEventListener('click',saveEntry);
+          $('jSearch').addEventListener('input',renderJournal);
+          $('jSort').addEventListener('change',renderJournal);
+          $('jClear').addEventListener('click',clearJournal);
+          $('jList').addEventListener('click',e=>{
+            const row=e.target.closest('.jrow');if(!row)return;
+            if(e.target.closest('.jdel'))deleteEntry(row.dataset.id);else loadEntry(row.dataset.id);
+          });
+          loadAll();syncUI();update();renderJournal();
+          </script>
+          </body>
+          </html>
+          EOF_HTML
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kozly-Weight-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
